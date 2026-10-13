@@ -1,0 +1,2525 @@
+﻿
+
+========== C:\proyectos_android\MiTiempoSemanal\.gradle ==========
+
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\androidTest\java\pe\edu\instituto\ponce\mitiemposemanal\ExampleInstrumentedTest.kt ==========
+
+package pe.edu.instituto.ponce.mitiemposemanal
+
+import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.ext.junit.runners.AndroidJUnit4
+
+import org.junit.Test
+import org.junit.runner.RunWith
+
+import org.junit.Assert.*
+
+/**
+ * Instrumented test, which will execute on an Android device.
+ *
+ * See [testing documentation](http://d.android.com/tools/testing).
+ */
+@RunWith(AndroidJUnit4::class)
+class ExampleInstrumentedTest {
+    @Test
+    fun useAppContext() {
+        // Context of the app under test.
+        val appContext = InstrumentationRegistry.getInstrumentation().targetContext
+        assertEquals("pe.edu.instituto.ponce.mitiemposemanal", appContext.packageName)
+    }
+}
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\main\java\pe\edu\instituto\ponce\mitiemposemanal\CalendarioActivity.kt ==========
+
+package pe.edu.instituto.ponce.mitiemposemanal
+
+import android.os.Bundle
+import android.widget.ArrayAdapter
+import android.widget.AutoCompleteTextView
+import android.widget.Button
+import android.widget.TextView
+import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import java.time.Duration
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+
+class CalendarioActivity : AppCompatActivity() {
+
+    private lateinit var dbManager: DatabaseManager
+    private lateinit var etBuscarTarea: AutoCompleteTextView
+    private lateinit var btnIniciar: Button
+    private lateinit var btnFinalizar: Button
+    private lateinit var rvEventos: RecyclerView
+    private lateinit var eventoAdapter: EventoAdapter
+
+    private var eventoEnCursoId: Long = -1L
+    private val prefsName = "MiTiempoPrefs"
+    private val keyEventoId = "evento_en_curso_id"
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_calendario)
+
+        dbManager = DatabaseManager(this)
+
+        etBuscarTarea = findViewById(R.id.etBuscarTarea)
+        btnIniciar = findViewById(R.id.btnIniciar)
+        btnFinalizar = findViewById(R.id.btnFinalizar)
+        rvEventos = findViewById(R.id.rvEventos)
+        val btnVolver: TextView = findViewById(R.id.btnVolver)
+
+        btnVolver.setOnClickListener { finish() }
+
+        // Configurar RecyclerView
+        eventoAdapter = EventoAdapter(dbManager.obtenerEventos())
+        rvEventos.layoutManager = LinearLayoutManager(this)
+        rvEventos.adapter = eventoAdapter
+
+        // Configurar Autocompletado (HU-03)
+        actualizarAdaptadorAutocompletado()
+
+        // Restaurar evento en curso si se cerrÃ³ la app (HU-05)
+        val prefs = getSharedPreferences(prefsName, MODE_PRIVATE)
+        eventoEnCursoId = prefs.getLong(keyEventoId, -1L)
+        if (eventoEnCursoId != -1L) {
+            activarModoEnCurso(true)
+        }
+
+        // BotÃ³n Iniciar (HU-04, HU-05)
+        btnIniciar.setOnClickListener {
+            val nombreTarea = etBuscarTarea.text.toString().trim()
+            if (nombreTarea.length < 2) {
+                Toast.makeText(this, "Escribe al menos 2 letras para la tarea", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            // Buscar si la tarea ya existe
+            var tarea = dbManager.buscarTareaPorNombre(nombreTarea)
+            if (tarea == null) {
+                // Si no existe, pedir categorÃ­a (HU-04)
+                mostrarDialogoCrearTarea(nombreTarea)
+            } else {
+                iniciarCronometroConTarea(tarea.id)
+            }
+        }
+
+        // BotÃ³n Finalizar (HU-05)
+        btnFinalizar.setOnClickListener {
+            finalizarCronometroActual()
+        }
+    }
+
+    private fun actualizarAdaptadorAutocompletado() {
+        val tareas = dbManager.obtenerTareas()
+        val nombresTareas = tareas.map { it.nombre }
+        val adapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, nombresTareas)
+        etBuscarTarea.setAdapter(adapter)
+    }
+
+    private fun mostrarDialogoCrearTarea(nombreTarea: String) {
+        val categorias = dbManager.obtenerCategorias()
+        if (categorias.isEmpty()) {
+            Toast.makeText(this, "No hay categorÃ­as registradas", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val nombresCategorias = categorias.map { it.nombre }.toTypedArray()
+        var categoriaSeleccionadaIndex = 0
+
+        AlertDialog.Builder(this)
+            .setTitle("[ NUEVA TAREA ]")
+            .setSingleChoiceItems(nombresCategorias, 0) { _, which ->
+                categoriaSeleccionadaIndex = which
+            }
+            .setPositiveButton("Crear e Iniciar") { _, _ ->
+                val catElegida = categorias[categoriaSeleccionadaIndex]
+                val nuevaTareaId = dbManager.agregarTareaRetornandoId(nombreTarea, catElegida.id)
+                if (nuevaTareaId != -1) {
+                    actualizarAdaptadorAutocompletado()
+                    iniciarCronometroConTarea(nuevaTareaId)
+                } else {
+                    Toast.makeText(this, "Error al crear la tarea", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun iniciarCronometroConTarea(tareaId: Int) {
+        val inicioIso = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+        val idGenerado = dbManager.iniciarEvento(tareaId, inicioIso)
+
+        if (idGenerado != -1L) {
+            eventoEnCursoId = idGenerado
+            getSharedPreferences(prefsName, MODE_PRIVATE).edit().putLong(keyEventoId, eventoEnCursoId).apply()
+            activarModoEnCurso(true)
+            Toast.makeText(this, "Evento iniciado correctamente", Toast.LENGTH_SHORT).show()
+            eventoAdapter.updateData(dbManager.obtenerEventos())
+        } else {
+            Toast.makeText(this, "Error al iniciar el evento", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun finalizarCronometroActual() {
+        val finIso = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+
+        // Calcular duraciÃ³n obteniendo el evento de la base de datos
+        val eventos = dbManager.obtenerEventos()
+        val eventoActual = eventos.find { it.id.toLong() == eventoEnCursoId }
+
+        var duracionTexto = "0m"
+        if (eventoActual != null) {
+            try {
+                val inicioDt = LocalDateTime.parse(eventoActual.inicio, DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+                val finDt = LocalDateTime.parse(finIso, DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+                val duracion = Duration.between(inicioDt, finDt)
+                val horas = duracion.toHours()
+                val minutos = duracion.toMinutes() % 60
+                duracionTexto = if (horas > 0) "${horas}h ${minutos}m" else "${minutos}m"
+            } catch (e: Exception) {
+                duracionTexto = "Completado"
+            }
+        }
+
+        if (dbManager.finalizarEvento(eventoEnCursoId, finIso, duracionTexto)) {
+            eventoEnCursoId = -1L
+            getSharedPreferences(prefsName, MODE_PRIVATE).edit().remove(keyEventoId).apply()
+            activarModoEnCurso(false)
+            etBuscarTarea.setText("")
+            Toast.makeText(this, "Evento finalizado con Ã©xito", Toast.LENGTH_SHORT).show()
+            eventoAdapter.updateData(dbManager.obtenerEventos())
+        } else {
+            Toast.makeText(this, "Error al finalizar el evento", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun activarModoEnCurso(enCurso: Boolean) {
+        btnIniciar.isEnabled = !enCurso
+        btnIniciar.setBackgroundColor(if (enCurso) 0xFF444444.toInt() else 0xFFFFFFFF.toInt())
+
+        btnFinalizar.isEnabled = enCurso
+        btnFinalizar.setBackgroundColor(if (enCurso) 0xFFFFFFFF.toInt() else 0xFF444444.toInt())
+
+        etBuscarTarea.isEnabled = !enCurso
+    }
+}
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\main\java\pe\edu\instituto\ponce\mitiemposemanal\Categoria.kt ==========
+
+package pe.edu.instituto.ponce.mitiemposemanal
+
+data class Categoria(
+    var id: Int = 0,
+    var nombre: String
+) {
+    // Sobrescribimos toString para que cuando mostremos la categorÃ­a en un menÃº desplegable (Spinner),
+    // se lea directamente el nombre de la categorÃ­a y no la referencia de memoria del objeto.
+    override fun toString(): String {
+        return nombre
+    }
+}
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\main\java\pe\edu\instituto\ponce\mitiemposemanal\CategoriaAdapter.kt ==========
+
+package pe.edu.instituto.ponce.mitiemposemanal
+
+import android.content.Context
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import android.widget.ArrayAdapter
+import android.widget.Button
+import android.widget.TextView
+
+class CategoriaAdapter(
+    context: Context,
+    private val categorias: List<Categoria>,
+    private val onEditClick: (Categoria) -> Unit,
+    private val onDeleteClick: (Categoria) -> Unit
+) : ArrayAdapter<Categoria>(context, 0, categorias) {
+
+    override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+        var view = convertView
+        if (view == null) {
+            view = LayoutInflater.from(context).inflate(R.layout.item_categoria, parent, false)
+        }
+
+        val categoria = categorias[position]
+
+        val tvNombre = view!!.findViewById<TextView>(R.id.tvNombreCategoriaItem)
+        val btnEditar = view.findViewById<Button>(R.id.btnEditarCategoria)
+        val btnBorrar = view.findViewById<Button>(R.id.btnBorrarCategoria)
+
+        tvNombre.text = categoria.nombre
+
+        // Configuramos la acciÃ³n de los botones para que envÃ­en la categorÃ­a seleccionada a la Actividad
+        btnEditar.setOnClickListener {
+            onEditClick(categoria)
+        }
+
+        btnBorrar.setOnClickListener {
+            onDeleteClick(categoria)
+        }
+
+        return view
+    }
+}
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\main\java\pe\edu\instituto\ponce\mitiemposemanal\CategoriasActivity.kt ==========
+
+package pe.edu.instituto.ponce.mitiemposemanal
+
+import android.app.Dialog
+import android.os.Bundle
+import android.widget.Button
+import android.widget.EditText
+import android.widget.ListView
+import android.widget.TextView
+import android.widget.Toast
+import androidx.appcompat.app.AppCompatActivity
+
+class CategoriasActivity : AppCompatActivity() {
+
+    private lateinit var dbManager: DatabaseManager
+    private lateinit var etNombreCategoria: EditText
+    private lateinit var btnGuardarCategoria: Button
+    private lateinit var lvCategorias: ListView
+    private lateinit var btnVolver: Button
+
+    private var listaCategorias = listOf<Categoria>()
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_categorias)
+
+        dbManager = DatabaseManager(this)
+
+        etNombreCategoria = findViewById(R.id.etNombreCategoria)
+        btnGuardarCategoria = findViewById(R.id.btnGuardarCategoria)
+        lvCategorias = findViewById(R.id.lvCategorias)
+        btnVolver = findViewById(R.id.btnVolver)
+
+        cargarCategorias()
+
+        // El botÃ³n superior ahora solo sirve para CREAR
+        btnGuardarCategoria.setOnClickListener {
+            guardarNuevaCategoria()
+        }
+
+        btnVolver.setOnClickListener {
+            finish()
+        }
+    }
+
+    private fun cargarCategorias() {
+        listaCategorias = dbManager.obtenerCategorias()
+        val adapter = CategoriaAdapter(
+            this,
+            listaCategorias,
+            onEditClick = { categoria -> mostrarDialogoEditar(categoria) },
+            onDeleteClick = { categoria -> mostrarDialogoEliminar(categoria) }
+        )
+        lvCategorias.adapter = adapter
+    }
+
+    private fun guardarNuevaCategoria() {
+        val nombre = etNombreCategoria.text.toString().trim()
+        if (nombre.isEmpty()) {
+            Toast.makeText(this, "El nombre no puede estar vacÃ­o", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val exito = dbManager.agregarCategoria(nombre)
+        if (exito) {
+            Toast.makeText(this, "CategorÃ­a guardada", Toast.LENGTH_SHORT).show()
+            etNombreCategoria.text.clear()
+            cargarCategorias()
+        } else {
+            Toast.makeText(this, "Error: La categorÃ­a ya existe", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun mostrarDialogoEditar(categoria: Categoria) {
+        val dialog = Dialog(this)
+        dialog.setContentView(R.layout.dialog_editar_categoria)
+
+        val etEditarNombre = dialog.findViewById<EditText>(R.id.etEditarNombreCategoria)
+        val btnCancelar = dialog.findViewById<Button>(R.id.btnCancelarEditarCat)
+        val btnConfirmar = dialog.findViewById<Button>(R.id.btnConfirmarEditarCat)
+
+        etEditarNombre.setText(categoria.nombre)
+
+        btnCancelar.setOnClickListener { dialog.dismiss() }
+        btnConfirmar.setOnClickListener {
+            val nuevoNombre = etEditarNombre.text.toString().trim()
+            if (nuevoNombre.isEmpty()) {
+                Toast.makeText(this, "El nombre no puede estar vacÃ­o", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            val exito = dbManager.actualizarCategoria(categoria.id, nuevoNombre)
+            if (exito) {
+                Toast.makeText(this, "CategorÃ­a actualizada", Toast.LENGTH_SHORT).show()
+                cargarCategorias()
+                dialog.dismiss()
+            } else {
+                Toast.makeText(this, "Error: Ya existe otra categorÃ­a con ese nombre", Toast.LENGTH_SHORT).show()
+            }
+        }
+        dialog.show()
+    }
+
+    private fun mostrarDialogoEliminar(categoria: Categoria) {
+        val dialog = Dialog(this)
+        dialog.setContentView(R.layout.dialog_eliminar)
+
+        val tvMensaje = dialog.findViewById<TextView>(R.id.tvMensajeEliminar)
+        val btnCancelar = dialog.findViewById<Button>(R.id.btnCancelarEliminar)
+        val btnConfirmar = dialog.findViewById<Button>(R.id.btnConfirmarEliminar)
+
+        tvMensaje.text = "Â¿Eliminar la categorÃ­a '${categoria.nombre}'?"
+
+        btnCancelar.setOnClickListener { dialog.dismiss() }
+        btnConfirmar.setOnClickListener {
+            val exito = dbManager.eliminarCategoria(categoria.id)
+            if (exito) {
+                Toast.makeText(this, "CategorÃ­a eliminada", Toast.LENGTH_SHORT).show()
+                cargarCategorias()
+            } else {
+                Toast.makeText(this, "No se puede eliminar: tiene tareas asociadas", Toast.LENGTH_LONG).show()
+            }
+            dialog.dismiss()
+        }
+        dialog.show()
+    }
+}
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\main\java\pe\edu\instituto\ponce\mitiemposemanal\DatabaseHelper.kt ==========
+
+package pe.edu.instituto.ponce.mitiemposemanal
+
+import android.content.ContentValues
+import android.content.Context
+import android.database.sqlite.SQLiteDatabase
+import android.database.sqlite.SQLiteOpenHelper
+
+class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
+
+    companion object {
+        private const val DATABASE_NAME = "MiTiempoSemanal.db"
+        private const val DATABASE_VERSION = 2
+
+        const val TABLE_CATEGORIES = "categorias"
+        const val COL_CAT_ID = "id"
+        const val COL_CAT_NAME = "nombre"
+
+        const val TABLE_TASKS = "tareas"
+        const val COL_TASK_ID = "id"
+        const val COL_TASK_NAME = "nombre"
+        const val COL_TASK_CAT_ID = "categoria_id"
+
+        // Tabla Eventos actualizada para HU-05 y Sprint 3
+        const val TABLE_EVENTS = "eventos"
+        const val COL_EV_ID = "id"
+        const val COL_EV_TASK_ID = "tarea_id"
+        const val COL_EV_START = "inicio" // LocalDateTime en ISO
+        const val COL_EV_END = "fin" // LocalDateTime en ISO
+        const val COL_EV_DURATION = "duracion" // DuraciÃ³n en formato texto o minutos
+    }
+
+    override fun onCreate(db: SQLiteDatabase) {
+        val createCategoriesTable = ("CREATE TABLE $TABLE_CATEGORIES ("
+                + "$COL_CAT_ID INTEGER PRIMARY KEY AUTOINCREMENT,"
+                + "$COL_CAT_NAME TEXT UNIQUE NOT NULL)")
+        db.execSQL(createCategoriesTable)
+
+        val createTasksTable = ("CREATE TABLE $TABLE_TASKS ("
+                + "$COL_TASK_ID INTEGER PRIMARY KEY AUTOINCREMENT,"
+                + "$COL_TASK_NAME TEXT NOT NULL,"
+                + "$COL_TASK_CAT_ID INTEGER NOT NULL,"
+                + "FOREIGN KEY($COL_TASK_CAT_ID) REFERENCES $TABLE_CATEGORIES($COL_CAT_ID) ON DELETE CASCADE)")
+        db.execSQL(createTasksTable)
+
+        val createEventsTable = ("CREATE TABLE $TABLE_EVENTS ("
+                + "$COL_EV_ID INTEGER PRIMARY KEY AUTOINCREMENT,"
+                + "$COL_EV_TASK_ID INTEGER NOT NULL,"
+                + "$COL_EV_START TEXT NOT NULL,"
+                + "$COL_EV_END TEXT,"
+                + "$COL_EV_DURATION TEXT,"
+                + "FOREIGN KEY($COL_EV_TASK_ID) REFERENCES $TABLE_TASKS($COL_TASK_ID) ON DELETE CASCADE)")
+        db.execSQL(createEventsTable)
+
+        insertarCategoriaDefecto(db, "Estudio")
+        insertarCategoriaDefecto(db, "Trabajo")
+        insertarCategoriaDefecto(db, "Descanso")
+        insertarCategoriaDefecto(db, "Ocio")
+    }
+
+    private fun insertarCategoriaDefecto(db: SQLiteDatabase, nombre: String) {
+        val values = ContentValues()
+        values.put(COL_CAT_NAME, nombre)
+        db.insert(TABLE_CATEGORIES, null, values)
+    }
+
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) {
+            val createEventsTable = ("CREATE TABLE $TABLE_EVENTS ("
+                    + "$COL_EV_ID INTEGER PRIMARY KEY AUTOINCREMENT,"
+                    + "$COL_EV_TASK_ID INTEGER NOT NULL,"
+                    + "$COL_EV_START TEXT NOT NULL,"
+                    + "$COL_EV_END TEXT,"
+                    + "$COL_EV_DURATION TEXT,"
+                    + "FOREIGN KEY($COL_EV_TASK_ID) REFERENCES $TABLE_TASKS($COL_TASK_ID) ON DELETE CASCADE)")
+            db.execSQL(createEventsTable)
+        }
+    }
+
+    override fun onOpen(db: SQLiteDatabase) {
+        super.onOpen(db)
+        if (!db.isReadOnly) {
+            db.execSQL("PRAGMA foreign_keys=ON;")
+        }
+    }
+}
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\main\java\pe\edu\instituto\ponce\mitiemposemanal\DatabaseManager.kt ==========
+
+package pe.edu.instituto.ponce.mitiemposemanal
+
+import android.content.ContentValues
+import android.content.Context
+
+class DatabaseManager(context: Context) {
+    private val dbHelper = DatabaseHelper(context)
+
+    // ================= MÃ‰TODOS PARA CATEGORÃAS =================
+
+    fun obtenerCategorias(): List<Categoria> {
+        val lista = mutableListOf<Categoria>()
+        val db = dbHelper.readableDatabase
+        val cursor = db.rawQuery("SELECT * FROM ${DatabaseHelper.TABLE_CATEGORIES} ORDER BY ${DatabaseHelper.COL_CAT_NAME}", null)
+        if (cursor.moveToFirst()) {
+            do {
+                val id = cursor.getInt(cursor.getColumnIndexOrThrow(DatabaseHelper.COL_CAT_ID))
+                val nombre = cursor.getString(cursor.getColumnIndexOrThrow(DatabaseHelper.COL_CAT_NAME))
+                lista.add(Categoria(id, nombre))
+            } while (cursor.moveToNext())
+        }
+        cursor.close()
+        db.close()
+        return lista
+    }
+
+    fun existeCategoria(nombre: String, idAignorar: Int = -1): Boolean {
+        val db = dbHelper.readableDatabase
+        val query = "SELECT COUNT(*) FROM ${DatabaseHelper.TABLE_CATEGORIES} WHERE LOWER(${DatabaseHelper.COL_CAT_NAME}) = LOWER(?) AND ${DatabaseHelper.COL_CAT_ID} != ?"
+        val cursor = db.rawQuery(query, arrayOf(nombre, idAignorar.toString()))
+        var existe = false
+        if (cursor.moveToFirst()) {
+            existe = cursor.getInt(0) > 0
+        }
+        cursor.close()
+        db.close()
+        return existe
+    }
+
+    fun agregarCategoria(nombre: String): Boolean {
+        if (existeCategoria(nombre)) return false
+        val db = dbHelper.writableDatabase
+        val values = ContentValues().apply {
+            put(DatabaseHelper.COL_CAT_NAME, nombre)
+        }
+        val result = db.insert(DatabaseHelper.TABLE_CATEGORIES, null, values)
+        db.close()
+        return result != -1L
+    }
+
+    fun actualizarCategoria(id: Int, nombre: String): Boolean {
+        if (existeCategoria(nombre, id)) return false
+        val db = dbHelper.writableDatabase
+        val values = ContentValues().apply {
+            put(DatabaseHelper.COL_CAT_NAME, nombre)
+        }
+        val result = db.update(DatabaseHelper.TABLE_CATEGORIES, values, "${DatabaseHelper.COL_CAT_ID}=?", arrayOf(id.toString()))
+        db.close()
+        return result > 0
+    }
+
+    fun categoriaTieneTareas(idCategoria: Int): Boolean {
+        val db = dbHelper.readableDatabase
+        val query = "SELECT COUNT(*) FROM ${DatabaseHelper.TABLE_TASKS} WHERE ${DatabaseHelper.COL_TASK_CAT_ID} = ?"
+        val cursor = db.rawQuery(query, arrayOf(idCategoria.toString()))
+        var tieneTareas = false
+        if (cursor.moveToFirst()) {
+            tieneTareas = cursor.getInt(0) > 0
+        }
+        cursor.close()
+        db.close()
+        return tieneTareas
+    }
+
+    fun eliminarCategoria(id: Int): Boolean {
+        if (categoriaTieneTareas(id)) return false
+        val db = dbHelper.writableDatabase
+        val result = db.delete(DatabaseHelper.TABLE_CATEGORIES, "${DatabaseHelper.COL_CAT_ID}=?", arrayOf(id.toString()))
+        db.close()
+        return result > 0
+    }
+
+    // ================= MÃ‰TODOS PARA TAREAS =================
+
+    fun obtenerTareas(): List<Tarea> {
+        val lista = mutableListOf<Tarea>()
+        val db = dbHelper.readableDatabase
+        val query = """
+            SELECT t.${DatabaseHelper.COL_TASK_ID}, t.${DatabaseHelper.COL_TASK_NAME}, 
+                   t.${DatabaseHelper.COL_TASK_CAT_ID}, c.${DatabaseHelper.COL_CAT_NAME}
+            FROM ${DatabaseHelper.TABLE_TASKS} t
+            INNER JOIN ${DatabaseHelper.TABLE_CATEGORIES} c ON t.${DatabaseHelper.COL_TASK_CAT_ID} = c.${DatabaseHelper.COL_CAT_ID}
+            ORDER BY t.${DatabaseHelper.COL_TASK_NAME}
+        """.trimIndent()
+
+        val cursor = db.rawQuery(query, null)
+        if (cursor.moveToFirst()) {
+            do {
+                lista.add(Tarea(cursor.getInt(0), cursor.getString(1), cursor.getInt(2), cursor.getString(3)))
+            } while (cursor.moveToNext())
+        }
+        cursor.close()
+        db.close()
+        return lista
+    }
+
+    fun existeTarea(nombre: String, idAignorar: Int = -1): Boolean {
+        val db = dbHelper.readableDatabase
+        val query = "SELECT COUNT(*) FROM ${DatabaseHelper.TABLE_TASKS} WHERE LOWER(${DatabaseHelper.COL_TASK_NAME}) = LOWER(?) AND ${DatabaseHelper.COL_TASK_ID} != ?"
+        val cursor = db.rawQuery(query, arrayOf(nombre, idAignorar.toString()))
+        var existe = false
+        if (cursor.moveToFirst()) {
+            existe = cursor.getInt(0) > 0
+        }
+        cursor.close()
+        db.close()
+        return existe
+    }
+
+    fun agregarTarea(nombre: String, idCategoria: Int): Boolean {
+        if (existeTarea(nombre)) return false
+        val db = dbHelper.writableDatabase
+        val values = ContentValues().apply {
+            put(DatabaseHelper.COL_TASK_NAME, nombre.trim())
+            put(DatabaseHelper.COL_TASK_CAT_ID, idCategoria)
+        }
+        val result = db.insert(DatabaseHelper.TABLE_TASKS, null, values)
+        db.close()
+        return result != -1L
+    }
+
+    fun agregarTareaRetornandoId(nombre: String, idCategoria: Int): Int {
+        val db = dbHelper.writableDatabase
+        val values = ContentValues().apply {
+            put(DatabaseHelper.COL_TASK_NAME, nombre.trim())
+            put(DatabaseHelper.COL_TASK_CAT_ID, idCategoria)
+        }
+        val id = db.insert(DatabaseHelper.TABLE_TASKS, null, values).toInt()
+        db.close()
+        return id
+    }
+
+    fun actualizarTarea(id: Int, nombre: String, idCategoria: Int): Boolean {
+        if (existeTarea(nombre, id)) return false
+        val db = dbHelper.writableDatabase
+        val values = ContentValues().apply {
+            put(DatabaseHelper.COL_TASK_NAME, nombre.trim())
+            put(DatabaseHelper.COL_TASK_CAT_ID, idCategoria)
+        }
+        val result = db.update(DatabaseHelper.TABLE_TASKS, values, "${DatabaseHelper.COL_TASK_ID}=?", arrayOf(id.toString()))
+        db.close()
+        return result > 0
+    }
+
+    fun tareaTieneEventos(idTarea: Int): Boolean {
+        val db = dbHelper.readableDatabase
+        val query = "SELECT COUNT(*) FROM ${DatabaseHelper.TABLE_EVENTS} WHERE ${DatabaseHelper.COL_EV_TASK_ID} = ?"
+        val cursor = db.rawQuery(query, arrayOf(idTarea.toString()))
+        var tieneEventos = false
+        if (cursor.moveToFirst()) {
+            tieneEventos = cursor.getInt(0) > 0
+        }
+        cursor.close()
+        db.close()
+        return tieneEventos
+    }
+
+    fun eliminarTarea(id: Int): Boolean {
+        if (tareaTieneEventos(id)) return false
+        val db = dbHelper.writableDatabase
+        val result = db.delete(DatabaseHelper.TABLE_TASKS, "${DatabaseHelper.COL_TASK_ID}=?", arrayOf(id.toString()))
+        db.close()
+        return result > 0
+    }
+
+    fun buscarTareaPorNombre(nombre: String): Tarea? {
+        val db = dbHelper.readableDatabase
+        val query = """
+            SELECT t.${DatabaseHelper.COL_TASK_ID}, t.${DatabaseHelper.COL_TASK_NAME}, 
+                   t.${DatabaseHelper.COL_TASK_CAT_ID}, c.${DatabaseHelper.COL_CAT_NAME}
+            FROM ${DatabaseHelper.TABLE_TASKS} t
+            INNER JOIN ${DatabaseHelper.TABLE_CATEGORIES} c ON t.${DatabaseHelper.COL_TASK_CAT_ID} = c.${DatabaseHelper.COL_CAT_ID}
+            WHERE LOWER(t.${DatabaseHelper.COL_TASK_NAME}) = LOWER(?)
+        """.trimIndent()
+        val cursor = db.rawQuery(query, arrayOf(nombre.trim()))
+        var tarea: Tarea? = null
+        if (cursor.moveToFirst()) {
+            tarea = Tarea(cursor.getInt(0), cursor.getString(1), cursor.getInt(2), cursor.getString(3))
+        }
+        cursor.close()
+        db.close()
+        return tarea
+    }
+
+    // ================= MÃ‰TODOS PARA EVENTOS (SPRINT 2) =================
+
+    fun iniciarEvento(tareaId: Int, inicioIso: String): Long {
+        val db = dbHelper.writableDatabase
+        val values = ContentValues().apply {
+            put(DatabaseHelper.COL_EV_TASK_ID, tareaId)
+            put(DatabaseHelper.COL_EV_START, inicioIso)
+        }
+        val id = db.insert(DatabaseHelper.TABLE_EVENTS, null, values)
+        db.close()
+        return id
+    }
+
+    fun finalizarEvento(eventoId: Long, finIso: String, duracionStr: String): Boolean {
+        val db = dbHelper.writableDatabase
+        val values = ContentValues().apply {
+            put(DatabaseHelper.COL_EV_END, finIso)
+            put(DatabaseHelper.COL_EV_DURATION, duracionStr)
+        }
+        val result = db.update(DatabaseHelper.TABLE_EVENTS, values, "${DatabaseHelper.COL_EV_ID}=?", arrayOf(eventoId.toString()))
+        db.close()
+        return result > 0
+    }
+
+    fun obtenerEventos(): List<Evento> {
+        val lista = mutableListOf<Evento>()
+        val db = dbHelper.readableDatabase
+        val query = """
+            SELECT e.${DatabaseHelper.COL_EV_ID}, e.${DatabaseHelper.COL_EV_TASK_ID}, 
+                   t.${DatabaseHelper.COL_TASK_NAME}, c.${DatabaseHelper.COL_CAT_NAME},
+                   e.${DatabaseHelper.COL_EV_START}, e.${DatabaseHelper.COL_EV_END}, e.${DatabaseHelper.COL_EV_DURATION}
+            FROM ${DatabaseHelper.TABLE_EVENTS} e
+            INNER JOIN ${DatabaseHelper.TABLE_TASKS} t ON e.${DatabaseHelper.COL_EV_TASK_ID} = t.${DatabaseHelper.COL_TASK_ID}
+            INNER JOIN ${DatabaseHelper.TABLE_CATEGORIES} c ON t.${DatabaseHelper.COL_TASK_CAT_ID} = c.${DatabaseHelper.COL_CAT_ID}
+            ORDER BY e.${DatabaseHelper.COL_EV_ID} DESC
+        """.trimIndent()
+
+        val cursor = db.rawQuery(query, null)
+        if (cursor.moveToFirst()) {
+            do {
+                lista.add(
+                    Evento(
+                        id = cursor.getInt(0),
+                        tareaId = cursor.getInt(1),
+                        tareaNombre = cursor.getString(2),
+                        categoriaNombre = cursor.getString(3),
+                        inicio = cursor.getString(4),
+                        fin = cursor.getString(5),
+                        duracion = cursor.getString(6)
+                    )
+                )
+            } while (cursor.moveToNext())
+        }
+        cursor.close()
+        db.close()
+        return lista
+    }
+}
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\main\java\pe\edu\instituto\ponce\mitiemposemanal\Evento.kt ==========
+
+package pe.edu.instituto.ponce.mitiemposemanal
+
+data class Evento(
+    val id: Int,
+    val tareaId: Int,
+    val tareaNombre: String,
+    val categoriaNombre: String,
+    val inicio: String,
+    val fin: String?,
+    val duracion: String?
+)
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\main\java\pe\edu\instituto\ponce\mitiemposemanal\EventoAdapter.kt ==========
+
+package pe.edu.instituto.ponce.mitiemposemanal
+
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import android.widget.TextView
+import androidx.recyclerview.widget.RecyclerView
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+
+class EventoAdapter(private var eventos: List<Evento>) : RecyclerView.Adapter<EventoAdapter.EventoViewHolder>() {
+
+    private val inputFormatter = DateTimeFormatter.ISO_LOCAL_DATE_TIME
+    private val outputTimeFormatter = DateTimeFormatter.ofPattern("dd/MM HH:mm")
+
+    class EventoViewHolder(view: View) : RecyclerView.ViewHolder(view) {
+        val tvTarea: TextView = view.findViewById(R.id.tvItemTarea)
+        val tvCategoria: TextView = view.findViewById(R.id.tvItemCategoria)
+        val tvHorarios: TextView = view.findViewById(R.id.tvItemHorarios)
+        val tvDuracion: TextView = view.findViewById(R.id.tvItemDuracion)
+    }
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): EventoViewHolder {
+        val view = LayoutInflater.from(parent.context).inflate(R.layout.item_evento, parent, false)
+        return EventoViewHolder(view)
+    }
+
+    override fun onBindViewHolder(holder: EventoViewHolder, position: Int) {
+        val evento = eventos[position]
+        holder.tvTarea.text = evento.tareaNombre
+        holder.tvCategoria.text = "CategorÃ­a: ${evento.categoriaNombre}"
+
+        try {
+            val inicioParsed = LocalDateTime.parse(evento.inicio, inputFormatter)
+            val inicioStr = inicioParsed.format(outputTimeFormatter)
+
+            if (evento.fin != null) {
+                val finParsed = LocalDateTime.parse(evento.fin, inputFormatter)
+                val finStr = finParsed.format(outputTimeFormatter)
+                holder.tvHorarios.text = "Inicio: $inicioStr  â€¢  Fin: $finStr"
+                holder.tvDuracion.text = evento.duracion ?: ""
+            } else {
+                holder.tvHorarios.text = "Inicio: $inicioStr  â€¢  [EN CURSO]"
+                holder.tvDuracion.text = "Activo"
+            }
+        } catch (e: Exception) {
+            holder.tvHorarios.text = "Inicio: ${evento.inicio}"
+            holder.tvDuracion.text = evento.duracion ?: ""
+        }
+    }
+
+    override fun getItemCount(): Int = eventos.size
+
+    fun updateData(nuevosEventos: List<Evento>) {
+        eventos = nuevosEventos
+        notifyDataSetChanged()
+    }
+}
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\main\java\pe\edu\instituto\ponce\mitiemposemanal\MainActivity.kt ==========
+
+package pe.edu.instituto.ponce.mitiemposemanal
+
+import android.content.Intent
+import android.os.Bundle
+import android.widget.Button
+import androidx.appcompat.app.AppCompatActivity
+
+class MainActivity : AppCompatActivity() {
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
+
+        // Enlazamos las variables con los botones del diseÃ±o XML
+        val btnCategorias = findViewById<Button>(R.id.btnCategorias)
+        val btnTareas = findViewById<Button>(R.id.btnTareas)
+        val btnCalendario = findViewById<Button>(R.id.btnCalendario) // Nuevo botÃ³n
+
+        // AcciÃ³n para ir a la pantalla de CategorÃ­as
+        btnCategorias.setOnClickListener {
+            val intent = Intent(this, CategoriasActivity::class.java)
+            startActivity(intent)
+        }
+
+        // AcciÃ³n para ir a la pantalla de Tareas
+        btnTareas.setOnClickListener {
+            val intent = Intent(this, TareasActivity::class.java)
+            startActivity(intent)
+        }
+
+        // AcciÃ³n para ir a la pantalla del Calendario
+        btnCalendario.setOnClickListener {
+            val intent = Intent(this, CalendarioActivity::class.java)
+            startActivity(intent)
+        }
+    }
+}
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\main\java\pe\edu\instituto\ponce\mitiemposemanal\Tarea.kt ==========
+
+package pe.edu.instituto.ponce.mitiemposemanal
+
+data class Tarea(
+    var id: Int = 0,
+    var nombre: String,
+    var categoriaId: Int,
+    var categoriaNombre: String = ""
+)
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\main\java\pe\edu\instituto\ponce\mitiemposemanal\TareaAdapter.kt ==========
+
+package pe.edu.instituto.ponce.mitiemposemanal
+
+import android.content.Context
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import android.widget.ArrayAdapter
+import android.widget.Button
+import android.widget.TextView
+
+class TareaAdapter(
+    context: Context,
+    private val tareas: List<Tarea>,
+    private val onEditClick: (Tarea) -> Unit,
+    private val onDeleteClick: (Tarea) -> Unit
+) : ArrayAdapter<Tarea>(context, 0, tareas) {
+
+    override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+        var view = convertView
+        if (view == null) {
+            view = LayoutInflater.from(context).inflate(R.layout.item_tarea, parent, false)
+        }
+
+        val tarea = tareas[position]
+
+        val tvNombre = view!!.findViewById<TextView>(R.id.tvNombreTareaItem)
+        val tvCategoria = view.findViewById<TextView>(R.id.tvCategoriaTareaItem)
+        val btnEditar = view.findViewById<Button>(R.id.btnEditarTarea)
+        val btnBorrar = view.findViewById<Button>(R.id.btnBorrarTarea)
+
+        // Asignamos los textos al diseÃ±o
+        tvNombre.text = tarea.nombre
+        tvCategoria.text = tarea.categoriaNombre
+
+        // Configuramos la acciÃ³n de los botones para que envÃ­en la tarea seleccionada a la Actividad
+        btnEditar.setOnClickListener {
+            onEditClick(tarea)
+        }
+
+        btnBorrar.setOnClickListener {
+            onDeleteClick(tarea)
+        }
+
+        return view
+    }
+}
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\main\java\pe\edu\instituto\ponce\mitiemposemanal\TareasActivity.kt ==========
+
+package pe.edu.instituto.ponce.mitiemposemanal
+
+import android.app.Dialog
+import android.os.Bundle
+import android.widget.ArrayAdapter
+import android.widget.Button
+import android.widget.EditText
+import android.widget.ListView
+import android.widget.Spinner
+import android.widget.TextView
+import android.widget.Toast
+import androidx.appcompat.app.AppCompatActivity
+
+class TareasActivity : AppCompatActivity() {
+
+    private lateinit var dbManager: DatabaseManager
+    private lateinit var etNombreTarea: EditText
+    private lateinit var spCategorias: Spinner
+    private lateinit var btnGuardarTarea: Button
+    private lateinit var lvTareas: ListView
+    private lateinit var btnVolverTareas: Button
+
+    private var listaCategorias = listOf<Categoria>()
+    private var listaTareas = listOf<Tarea>()
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_tareas)
+
+        dbManager = DatabaseManager(this)
+
+        etNombreTarea = findViewById(R.id.etNombreTarea)
+        spCategorias = findViewById(R.id.spCategorias)
+        btnGuardarTarea = findViewById(R.id.btnGuardarTarea)
+        lvTareas = findViewById(R.id.lvTareas)
+        btnVolverTareas = findViewById(R.id.btnVolverTareas)
+
+        cargarCategorias()
+        cargarTareas()
+
+        // El botÃ³n superior ahora solo sirve para CREAR
+        btnGuardarTarea.setOnClickListener {
+            guardarNuevaTarea()
+        }
+
+        btnVolverTareas.setOnClickListener {
+            finish()
+        }
+    }
+
+    private fun cargarCategorias() {
+        listaCategorias = dbManager.obtenerCategorias()
+        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listaCategorias)
+        spCategorias.adapter = adapter
+    }
+
+    private fun cargarTareas() {
+        listaTareas = dbManager.obtenerTareas()
+        val adapter = TareaAdapter(
+            this,
+            listaTareas,
+            onEditClick = { tarea -> mostrarDialogoEditar(tarea) },
+            onDeleteClick = { tarea -> mostrarDialogoEliminar(tarea) }
+        )
+        lvTareas.adapter = adapter
+    }
+
+    private fun guardarNuevaTarea() {
+        val nombre = etNombreTarea.text.toString().trim()
+        val categoriaSeleccionada = spCategorias.selectedItem as? Categoria
+
+        if (nombre.isEmpty()) {
+            Toast.makeText(this, "La tarea debe tener un nombre", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        if (categoriaSeleccionada == null) {
+            Toast.makeText(this, "Debes crear y seleccionar una categorÃ­a primero", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val exito = dbManager.agregarTarea(nombre, categoriaSeleccionada.id)
+        if (exito) {
+            Toast.makeText(this, "Tarea guardada", Toast.LENGTH_SHORT).show()
+            etNombreTarea.text.clear()
+            if (listaCategorias.isNotEmpty()) spCategorias.setSelection(0)
+            cargarTareas()
+        } else {
+            Toast.makeText(this, "Error: Ya existe una tarea con ese nombre", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun mostrarDialogoEditar(tarea: Tarea) {
+        val dialog = Dialog(this)
+        dialog.setContentView(R.layout.dialog_editar_tarea)
+
+        val etEditarNombre = dialog.findViewById<EditText>(R.id.etEditarNombreTarea)
+        val spEditarCategoria = dialog.findViewById<Spinner>(R.id.spEditarCategoriaTarea)
+        val btnCancelar = dialog.findViewById<Button>(R.id.btnCancelarEditarTarea)
+        val btnConfirmar = dialog.findViewById<Button>(R.id.btnConfirmarEditarTarea)
+
+        etEditarNombre.setText(tarea.nombre)
+
+        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listaCategorias)
+        spEditarCategoria.adapter = adapter
+
+        val indexCategoria = listaCategorias.indexOfFirst { it.id == tarea.categoriaId }
+        if (indexCategoria != -1) {
+            spEditarCategoria.setSelection(indexCategoria)
+        }
+
+        btnCancelar.setOnClickListener { dialog.dismiss() }
+        btnConfirmar.setOnClickListener {
+            val nuevoNombre = etEditarNombre.text.toString().trim()
+            val categoriaSeleccionada = spEditarCategoria.selectedItem as? Categoria
+
+            if (nuevoNombre.isEmpty()) {
+                Toast.makeText(this, "La tarea debe tener un nombre", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            if (categoriaSeleccionada == null) return@setOnClickListener
+
+            val exito = dbManager.actualizarTarea(tarea.id, nuevoNombre, categoriaSeleccionada.id)
+            if (exito) {
+                Toast.makeText(this, "Tarea actualizada", Toast.LENGTH_SHORT).show()
+                cargarTareas()
+                dialog.dismiss()
+            } else {
+                Toast.makeText(this, "Error: Ya existe otra tarea con ese nombre", Toast.LENGTH_SHORT).show()
+            }
+        }
+        dialog.show()
+    }
+
+    private fun mostrarDialogoEliminar(tarea: Tarea) {
+        val dialog = Dialog(this)
+        dialog.setContentView(R.layout.dialog_eliminar)
+
+        val tvMensaje = dialog.findViewById<TextView>(R.id.tvMensajeEliminar)
+        val btnCancelar = dialog.findViewById<Button>(R.id.btnCancelarEliminar)
+        val btnConfirmar = dialog.findViewById<Button>(R.id.btnConfirmarEliminar)
+
+        tvMensaje.text = "Â¿Eliminar la tarea '${tarea.nombre}'?"
+
+        btnCancelar.setOnClickListener { dialog.dismiss() }
+        btnConfirmar.setOnClickListener {
+            val exito = dbManager.eliminarTarea(tarea.id)
+            if (exito) {
+                Toast.makeText(this, "Tarea eliminada", Toast.LENGTH_SHORT).show()
+                cargarTareas()
+            } else {
+                Toast.makeText(this, "Error al eliminar", Toast.LENGTH_SHORT).show()
+            }
+            dialog.dismiss()
+        }
+        dialog.show()
+    }
+}
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\main\res\drawable\ic_launcher_background.xml ==========
+
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#3DDC84"
+        android:pathData="M0,0h108v108h-108z" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M9,0L9,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19,0L19,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M29,0L29,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M39,0L39,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M49,0L49,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M59,0L59,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M69,0L69,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M79,0L79,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M89,0L89,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M99,0L99,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,9L108,9"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,19L108,19"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,29L108,29"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,39L108,39"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,49L108,49"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,59L108,59"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,69L108,69"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,79L108,79"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,89L108,89"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,99L108,99"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19,29L89,29"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19,39L89,39"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19,49L89,49"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19,59L89,59"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19,69L89,69"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19,79L89,79"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M29,19L29,89"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M39,19L39,89"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M49,19L49,89"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M59,19L59,89"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M69,19L69,89"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M79,19L79,89"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+</vector>
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\main\res\drawable\ic_launcher_foreground.xml ==========
+
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:pathData="M31,63.928c0,0 6.4,-11 12.1,-13.1c7.2,-2.6 26,-1.4 26,-1.4l38.1,38.1L107,108.928l-32,-1L31,63.928z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:endX="85.84757"
+                android:endY="92.4963"
+                android:startX="42.9492"
+                android:startY="49.59793"
+                android:type="linear">
+                <item
+                    android:color="#44000000"
+                    android:offset="0.0" />
+                <item
+                    android:color="#00000000"
+                    android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillType="nonZero"
+        android:pathData="M65.3,45.828l3.8,-6.6c0.2,-0.4 0.1,-0.9 -0.3,-1.1c-0.4,-0.2 -0.9,-0.1 -1.1,0.3l-3.9,6.7c-6.3,-2.8 -13.4,-2.8 -19.7,0l-3.9,-6.7c-0.2,-0.4 -0.7,-0.5 -1.1,-0.3C38.8,38.328 38.7,38.828 38.9,39.228l3.8,6.6C36.2,49.428 31.7,56.028 31,63.928h46C76.3,56.028 71.8,49.428 65.3,45.828zM43.4,57.328c-0.8,0 -1.5,-0.5 -1.8,-1.2c-0.3,-0.7 -0.1,-1.5 0.4,-2.1c0.5,-0.5 1.4,-0.7 2.1,-0.4c0.7,0.3 1.2,1 1.2,1.8C45.3,56.528 44.5,57.328 43.4,57.328L43.4,57.328zM64.6,57.328c-0.8,0 -1.5,-0.5 -1.8,-1.2s-0.1,-1.5 0.4,-2.1c0.5,-0.5 1.4,-0.7 2.1,-0.4c0.7,0.3 1.2,1 1.2,1.8C66.5,56.528 65.6,57.328 64.6,57.328L64.6,57.328z"
+        android:strokeWidth="1"
+        android:strokeColor="#00000000" />
+</vector>
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\main\res\layout\activity_calendario.xml ==========
+
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:fitsSystemWindows="true"
+    android:background="@color/fondo_oscuro"
+    android:padding="24dp">
+
+    <!-- Cabecera de NavegaciÃ³n -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="24dp">
+
+        <TextView
+            android:id="@+id/btnVolver"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="â†"
+            android:textColor="@color/blanco_pixel"
+            android:textSize="28sp"
+            android:textStyle="bold"
+            android:fontFamily="monospace"
+            android:paddingEnd="16dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="[ EVENTOS ]"
+            android:textColor="@color/blanco_pixel"
+            android:textSize="22sp"
+            android:textStyle="bold"
+            android:fontFamily="monospace" />
+    </LinearLayout>
+
+    <!-- SecciÃ³n de Control de Tarea (HU-03 / HU-04 / HU-05) -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="#1E1E1E"
+        android:padding="16dp"
+        android:layout_marginBottom="16dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="BUSCAR O CREAR TAREA:"
+            android:textColor="@color/blanco_pixel"
+            android:textSize="12sp"
+            android:fontFamily="monospace"
+            android:layout_marginBottom="8dp"/>
+
+        <!-- BÃºsqueda Predictiva (HU-03) -->
+        <AutoCompleteTextView
+            android:id="@+id/etBuscarTarea"
+            android:layout_width="match_parent"
+            android:layout_height="50dp"
+            android:hint="Escribe al menos 2 letras..."
+            android:textColorHint="#888888"
+            android:textColor="@color/blanco_pixel"
+            android:textSize="14sp"
+            android:fontFamily="monospace"
+            android:background="@android:drawable/editbox_background_normal"
+            android:paddingHorizontal="12dp"
+            android:completionThreshold="2"
+            android:layout_marginBottom="12dp"/>
+
+        <!-- Botones de Control de CronÃ³metro (HU-05) -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:weightSum="2">
+
+            <Button
+                android:id="@+id/btnIniciar"
+                android:layout_width="0dp"
+                android:layout_height="50dp"
+                android:layout_weight="1"
+                android:text="INICIAR"
+                android:textColor="@color/fondo_oscuro"
+                android:backgroundTint="@color/blanco_pixel"
+                android:textStyle="bold"
+                android:fontFamily="monospace"
+                android:layout_marginEnd="6dp"
+                android:stateListAnimator="@null"/>
+
+            <Button
+                android:id="@+id/btnFinalizar"
+                android:layout_width="0dp"
+                android:layout_height="50dp"
+                android:layout_weight="1"
+                android:text="FINALIZAR"
+                android:textColor="@color/blanco_pixel"
+                android:backgroundTint="#444444"
+                android:textStyle="bold"
+                android:fontFamily="monospace"
+                android:layout_marginStart="6dp"
+                android:enabled="false"
+                android:stateListAnimator="@null"/>
+        </LinearLayout>
+    </LinearLayout>
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="[ HISTORIAL DE EVENTOS ]"
+        android:textColor="@color/blanco_pixel"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:fontFamily="monospace"
+        android:layout_marginBottom="8dp"/>
+
+    <!-- Lista de Historial de Eventos -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/rvEventos"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"/>
+
+</LinearLayout>
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\main\res\layout\activity_categorias.xml ==========
+
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:fitsSystemWindows="true"
+    android:background="@color/fondo_oscuro">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:layout_marginStart="32dp"
+        android:layout_marginEnd="32dp"
+        android:layout_marginTop="32dp"
+        android:layout_marginBottom="32dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="24dp">
+
+            <!-- BotÃ³n Volver convertido en "solo flecha" -->
+            <Button
+                android:id="@+id/btnVolver"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="â†"
+                android:textColor="@color/blanco_pixel"
+                android:background="@android:color/transparent"
+                android:textSize="36sp"
+                android:textStyle="bold"
+                android:fontFamily="monospace"
+                android:stateListAnimator="@null"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:padding="0dp"/>
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="[ CATEGORÃAS ]"
+                android:textColor="@color/blanco_pixel"
+                android:textSize="26sp"
+                android:textStyle="bold"
+                android:textAlignment="center"
+                android:fontFamily="monospace"
+                android:letterSpacing="0.05"
+                android:layout_marginStart="8dp"/>
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="16dp">
+
+            <EditText
+                android:id="@+id/etNombreCategoria"
+                android:layout_width="0dp"
+                android:layout_height="55dp"
+                android:layout_weight="1"
+                android:hint="NUEVA CATEGORÃA_"
+                android:textColorHint="@color/gris_medio"
+                android:textColor="@color/blanco_pixel"
+                android:backgroundTint="@color/blanco_pixel"
+                android:inputType="textCapWords"
+                android:maxLines="1"
+                android:fontFamily="monospace"
+                android:padding="8dp"/>
+
+            <Button
+                android:id="@+id/btnGuardarCategoria"
+                android:layout_width="wrap_content"
+                android:layout_height="55dp"
+                android:text="GUARDAR"
+                android:textColor="@color/fondo_oscuro"
+                android:backgroundTint="@color/blanco_pixel"
+                android:textStyle="bold"
+                android:fontFamily="monospace"
+                android:stateListAnimator="@null"
+                android:layout_marginStart="8dp"/>
+        </LinearLayout>
+
+        <ListView
+            android:id="@+id/lvCategorias"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:divider="@color/gris_medio"
+            android:dividerHeight="2dp"/>
+    </LinearLayout>
+</LinearLayout>
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\main\res\layout\activity_main.xml ==========
+
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:fitsSystemWindows="true"
+    android:background="@color/fondo_oscuro">
+
+    <!-- Contenedor interno centrado con mÃ¡rgenes -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:layout_marginStart="32dp"
+        android:layout_marginEnd="32dp"
+        android:layout_marginTop="32dp"
+        android:layout_marginBottom="32dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="MI TIEMPO SEMANAL"
+            android:textAlignment="center"
+            android:textColor="@color/blanco_pixel"
+            android:textSize="32sp"
+            android:textStyle="bold"
+            android:fontFamily="monospace"
+            android:letterSpacing="0.05"
+            android:layout_marginBottom="50dp" />
+
+        <Button
+            android:id="@+id/btnCategorias"
+            android:layout_width="match_parent"
+            android:layout_height="65dp"
+            android:text="> GESTIONAR CATEGORÃAS"
+            android:textColor="@color/fondo_oscuro"
+            android:backgroundTint="@color/blanco_pixel"
+            android:textStyle="bold"
+            android:textSize="16sp"
+            android:fontFamily="monospace"
+            android:layout_marginBottom="24dp"
+            android:stateListAnimator="@null" />
+
+        <Button
+            android:id="@+id/btnTareas"
+            android:layout_width="match_parent"
+            android:layout_height="65dp"
+            android:text="> GESTIONAR TAREAS"
+            android:textColor="@color/fondo_oscuro"
+            android:backgroundTint="@color/blanco_pixel"
+            android:textStyle="bold"
+            android:textSize="16sp"
+            android:fontFamily="monospace"
+            android:layout_marginBottom="24dp"
+            android:stateListAnimator="@null" />
+
+        <!-- Nuevo botÃ³n para el Calendario (Sprint 2) -->
+        <Button
+            android:id="@+id/btnCalendario"
+            android:layout_width="match_parent"
+            android:layout_height="65dp"
+            android:text="> GESTIONAR CALENDARIO"
+            android:textColor="@color/fondo_oscuro"
+            android:backgroundTint="@color/blanco_pixel"
+            android:textStyle="bold"
+            android:textSize="16sp"
+            android:fontFamily="monospace"
+            android:layout_marginBottom="48dp"
+            android:stateListAnimator="@null" />
+
+        <!-- VersiÃ³n actualizada a v0.2.0 -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="[ Elian Porras Â· v0.2.0 ]"
+            android:textColor="@color/blanco_pixel"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:fontFamily="monospace" />
+    </LinearLayout>
+</LinearLayout>
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\main\res\layout\activity_tareas.xml ==========
+
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:fitsSystemWindows="true"
+    android:background="@color/fondo_oscuro">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:layout_marginStart="32dp"
+        android:layout_marginEnd="32dp"
+        android:layout_marginTop="32dp"
+        android:layout_marginBottom="32dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="24dp">
+
+            <!-- BotÃ³n Volver convertido en "solo flecha" -->
+            <Button
+                android:id="@+id/btnVolverTareas"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="â†"
+                android:textColor="@color/blanco_pixel"
+                android:background="@android:color/transparent"
+                android:textSize="36sp"
+                android:textStyle="bold"
+                android:fontFamily="monospace"
+                android:stateListAnimator="@null"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:padding="0dp"/>
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="[ TAREAS ]"
+                android:textColor="@color/blanco_pixel"
+                android:textSize="26sp"
+                android:textStyle="bold"
+                android:textAlignment="center"
+                android:fontFamily="monospace"
+                android:letterSpacing="0.05"
+                android:layout_marginStart="8dp"/>
+        </LinearLayout>
+
+        <EditText
+            android:id="@+id/etNombreTarea"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:hint="NUEVA TAREA_"
+            android:textColorHint="@color/gris_medio"
+            android:textColor="@color/blanco_pixel"
+            android:backgroundTint="@color/blanco_pixel"
+            android:inputType="textCapSentences"
+            android:maxLines="1"
+            android:fontFamily="monospace"
+            android:padding="8dp"
+            android:layout_marginBottom="12dp"/>
+
+        <!-- AquÃ­ forzamos el color oscuro de fondo para las opciones -->
+        <Spinner
+            android:id="@+id/spCategorias"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:backgroundTint="@color/blanco_pixel"
+            android:popupBackground="@color/fondo_oscuro"
+            android:layout_marginBottom="12dp"/>
+
+        <Button
+            android:id="@+id/btnGuardarTarea"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:text="GUARDAR TAREA"
+            android:textColor="@color/fondo_oscuro"
+            android:backgroundTint="@color/blanco_pixel"
+            android:textStyle="bold"
+            android:fontFamily="monospace"
+            android:stateListAnimator="@null"
+            android:layout_marginBottom="16dp"/>
+
+        <ListView
+            android:id="@+id/lvTareas"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:divider="@color/gris_medio"
+            android:dividerHeight="2dp"/>
+    </LinearLayout>
+</LinearLayout>
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\main\res\layout\dialog_agregar_evento.xml ==========
+
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="24dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Seleccionar Tarea:"
+        android:textStyle="bold"
+        android:layout_marginBottom="8dp"/>
+
+    <!-- Desplegable para seleccionar la tarea -->
+    <Spinner
+        android:id="@+id/spinner_tareas"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:background="@android:drawable/btn_dropdown"
+        android:layout_marginBottom="16dp"/>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:weightSum="2"
+        android:layout_marginBottom="16dp">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:layout_marginEnd="8dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Hora de inicio:"
+                android:textStyle="bold"/>
+
+            <Button
+                android:id="@+id/btn_hora_inicio"
+                style="?android:attr/spinnerStyle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="00:00" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:layout_marginStart="8dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Hora de fin:"
+                android:textStyle="bold"/>
+
+            <Button
+                android:id="@+id/btn_hora_fin"
+                style="?android:attr/spinnerStyle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="00:00" />
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\main\res\layout\dialog_editar_categoria.xml ==========
+
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="24dp"
+    android:background="@color/fondo_oscuro">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="[ EDITAR CATEGORÃA ]"
+        android:textColor="@color/blanco_pixel"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:fontFamily="monospace"
+        android:textAlignment="center"
+        android:layout_marginBottom="16dp"/>
+
+    <EditText
+        android:id="@+id/etEditarNombreCategoria"
+        android:layout_width="match_parent"
+        android:layout_height="55dp"
+        android:hint="NUEVO NOMBRE_"
+        android:textColorHint="@color/gris_medio"
+        android:textColor="@color/blanco_pixel"
+        android:backgroundTint="@color/blanco_pixel"
+        android:inputType="textCapWords"
+        android:maxLines="1"
+        android:fontFamily="monospace"
+        android:padding="8dp"
+        android:layout_marginBottom="24dp"/>
+
+    <!-- Fila de botones optimizada para dar prioridad al botÃ³n de actualizar -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <Button
+            android:id="@+id/btnCancelarEditarCat"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="CANCELAR"
+            android:textColor="@color/blanco_pixel"
+            android:background="@android:color/transparent"
+            android:fontFamily="monospace"
+            android:textStyle="bold"
+            android:layout_marginEnd="8dp"/>
+
+        <Button
+            android:id="@+id/btnConfirmarEditarCat"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="ACTUALIZAR"
+            android:textColor="@color/fondo_oscuro"
+            android:backgroundTint="@color/blanco_pixel"
+            android:fontFamily="monospace"
+            android:textStyle="bold"
+            android:stateListAnimator="@null"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"/>
+    </LinearLayout>
+</LinearLayout>
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\main\res\layout\dialog_editar_tarea.xml ==========
+
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="24dp"
+    android:background="@color/fondo_oscuro">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="[ EDITAR TAREA ]"
+        android:textColor="@color/blanco_pixel"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:fontFamily="monospace"
+        android:textAlignment="center"
+        android:layout_marginBottom="16dp"/>
+
+    <EditText
+        android:id="@+id/etEditarNombreTarea"
+        android:layout_width="match_parent"
+        android:layout_height="55dp"
+        android:hint="NUEVO NOMBRE_"
+        android:textColorHint="@color/gris_medio"
+        android:textColor="@color/blanco_pixel"
+        android:backgroundTint="@color/blanco_pixel"
+        android:inputType="textCapSentences"
+        android:maxLines="1"
+        android:fontFamily="monospace"
+        android:padding="8dp"
+        android:layout_marginBottom="12dp"/>
+
+    <Spinner
+        android:id="@+id/spEditarCategoriaTarea"
+        android:layout_width="match_parent"
+        android:layout_height="55dp"
+        android:backgroundTint="@color/blanco_pixel"
+        android:popupBackground="@color/fondo_oscuro"
+        android:layout_marginBottom="24dp"/>
+
+    <!-- Fila de botones optimizada para dar prioridad al botÃ³n de actualizar -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <Button
+            android:id="@+id/btnCancelarEditarTarea"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="CANCELAR"
+            android:textColor="@color/blanco_pixel"
+            android:background="@android:color/transparent"
+            android:fontFamily="monospace"
+            android:textStyle="bold"
+            android:layout_marginEnd="8dp"/>
+
+        <Button
+            android:id="@+id/btnConfirmarEditarTarea"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="ACTUALIZAR"
+            android:textColor="@color/fondo_oscuro"
+            android:backgroundTint="@color/blanco_pixel"
+            android:fontFamily="monospace"
+            android:textStyle="bold"
+            android:stateListAnimator="@null"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"/>
+    </LinearLayout>
+</LinearLayout>
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\main\res\layout\dialog_eliminar.xml ==========
+
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="24dp"
+    android:background="@color/fondo_oscuro">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="[ ELIMINAR ]"
+        android:textColor="@color/blanco_pixel"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:fontFamily="monospace"
+        android:textAlignment="center"
+        android:layout_marginBottom="16dp"/>
+
+    <TextView
+        android:id="@+id/tvMensajeEliminar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Â¿EstÃ¡s seguro?"
+        android:textColor="@color/blanco_pixel"
+        android:textSize="16sp"
+        android:fontFamily="monospace"
+        android:textAlignment="center"
+        android:layout_marginBottom="24dp"/>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/btnCancelarEliminar"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="CANCELAR"
+            android:textColor="@color/blanco_pixel"
+            android:background="@android:color/transparent"
+            android:fontFamily="monospace"
+            android:textStyle="bold"/>
+
+        <Button
+            android:id="@+id/btnConfirmarEliminar"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="ELIMINAR"
+            android:textColor="@color/fondo_oscuro"
+            android:backgroundTint="@color/blanco_pixel"
+            android:fontFamily="monospace"
+            android:textStyle="bold"
+            android:stateListAnimator="@null"/>
+    </LinearLayout>
+</LinearLayout>
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\main\res\layout\item_categoria.xml ==========
+
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:padding="12dp"
+    android:gravity="center_vertical"
+    android:background="@color/fondo_oscuro">
+
+    <!-- Nombre de la categorÃ­a -->
+    <TextView
+        android:id="@+id/tvNombreCategoriaItem"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:textColor="@color/blanco_pixel"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:fontFamily="monospace" />
+
+    <!-- BotÃ³n Editar -->
+    <Button
+        android:id="@+id/btnEditarCategoria"
+        android:layout_width="wrap_content"
+        android:layout_height="40dp"
+        android:text="EDITAR"
+        android:textColor="@color/fondo_oscuro"
+        android:backgroundTint="@color/blanco_pixel"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:fontFamily="monospace"
+        android:layout_marginEnd="8dp"
+        android:stateListAnimator="@null" />
+
+    <!-- BotÃ³n Borrar -->
+    <Button
+        android:id="@+id/btnBorrarCategoria"
+        android:layout_width="wrap_content"
+        android:layout_height="40dp"
+        android:text="BORRAR"
+        android:textColor="@color/fondo_oscuro"
+        android:backgroundTint="@color/blanco_pixel"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:fontFamily="monospace"
+        android:stateListAnimator="@null" />
+
+</LinearLayout>
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\main\res\layout\item_evento.xml ==========
+
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="#161616"
+    android:padding="12dp"
+    android:layout_marginBottom="8dp">
+
+    <TextView
+        android:id="@+id/tvItemTarea"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Nombre Tarea"
+        android:textColor="@color/blanco_pixel"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:fontFamily="monospace"/>
+
+    <TextView
+        android:id="@+id/tvItemCategoria"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="CategorÃ­a: Estudio"
+        android:textColor="#AAAAAA"
+        android:textSize="12sp"
+        android:fontFamily="monospace"
+        android:layout_marginTop="2dp"/>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginTop="6dp">
+
+        <TextView
+            android:id="@+id/tvItemHorarios"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Inicio: 10:00 - Fin: 11:30"
+            android:textColor="@color/blanco_pixel"
+            android:textSize="11sp"
+            android:fontFamily="monospace"/>
+
+        <TextView
+            android:id="@+id/tvItemDuracion"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="1h 30m"
+            android:textColor="#4CAF50"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:fontFamily="monospace"/>
+    </LinearLayout>
+</LinearLayout>
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\main\res\layout\item_tarea.xml ==========
+
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:padding="12dp"
+    android:gravity="center_vertical"
+    android:background="@color/fondo_oscuro">
+
+    <!-- Contenedor para los textos -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:layout_marginEnd="8dp">
+
+        <!-- Nombre de la tarea -->
+        <TextView
+            android:id="@+id/tvNombreTareaItem"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="@color/blanco_pixel"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:fontFamily="monospace" />
+
+        <!-- Nombre de la categorÃ­a -->
+        <TextView
+            android:id="@+id/tvCategoriaTareaItem"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="@color/blanco_pixel"
+            android:textSize="14sp"
+            android:fontFamily="monospace"
+            android:alpha="0.8" />
+    </LinearLayout>
+
+    <!-- BotÃ³n Editar -->
+    <Button
+        android:id="@+id/btnEditarTarea"
+        android:layout_width="wrap_content"
+        android:layout_height="40dp"
+        android:text="EDITAR"
+        android:textColor="@color/fondo_oscuro"
+        android:backgroundTint="@color/blanco_pixel"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:fontFamily="monospace"
+        android:layout_marginEnd="8dp"
+        android:stateListAnimator="@null" />
+
+    <!-- BotÃ³n Borrar -->
+    <Button
+        android:id="@+id/btnBorrarTarea"
+        android:layout_width="wrap_content"
+        android:layout_height="40dp"
+        android:text="BORRAR"
+        android:textColor="@color/fondo_oscuro"
+        android:backgroundTint="@color/blanco_pixel"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:fontFamily="monospace"
+        android:stateListAnimator="@null" />
+
+</LinearLayout>
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\main\res\mipmap-anydpi-v26\ic_launcher.xml ==========
+
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <monochrome android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\main\res\mipmap-anydpi-v26\ic_launcher_round.xml ==========
+
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <monochrome android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\main\res\values\colors.xml ==========
+
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+
+    <!-- Nueva Paleta Techno Time / Pixel Party -->
+    <color name="fondo_oscuro">#151515</color> <!-- Gris casi negro -->
+    <color name="blanco_pixel">#F4F4F4</color> <!-- Blanco para los textos y bordes -->
+    <color name="gris_medio">#444444</color> <!-- Para algunos detalles secundarios -->
+</resources>
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\main\res\values\strings.xml ==========
+
+<resources>
+    <string name="app_name">MiTiempoSemanal</string>
+</resources>
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\main\res\values\themes.xml ==========
+
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <style name="Base.Theme.MiTiempoSemanal" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- Paleta Techno Time / Pixel Party -->
+        <item name="colorPrimary">@color/blanco_pixel</item>
+        <item name="colorPrimaryVariant">@color/gris_medio</item>
+        <item name="colorOnPrimary">@color/fondo_oscuro</item>
+
+        <!-- Fondo oscuro y texto blanco por defecto -->
+        <item name="android:windowBackground">@color/fondo_oscuro</item>
+        <item name="android:textColor">@color/blanco_pixel</item>
+    </style>
+
+    <style name="Theme.MiTiempoSemanal" parent="Base.Theme.MiTiempoSemanal" />
+</resources>
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\main\res\values-night\themes.xml ==========
+
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <style name="Base.Theme.MiTiempoSemanal" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- Forzamos la misma paleta oscura -->
+        <item name="colorPrimary">@color/blanco_pixel</item>
+        <item name="colorPrimaryVariant">@color/gris_medio</item>
+        <item name="colorOnPrimary">@color/fondo_oscuro</item>
+
+        <!-- Fondo oscuro y texto blanco por defecto -->
+        <item name="android:windowBackground">@color/fondo_oscuro</item>
+        <item name="android:textColor">@color/blanco_pixel</item>
+    </style>
+</resources>
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\main\res\xml\backup_rules.xml ==========
+
+<?xml version="1.0" encoding="utf-8"?><!--
+   Sample backup rules file; uncomment and customize as necessary.
+   See https://developer.android.com/guide/topics/data/autobackup
+   for details.
+   Note: This file is ignored for devices older than API 31
+   See https://developer.android.com/about/versions/12/backup-restore
+-->
+<full-backup-content>
+    <!--
+   <include domain="sharedpref" path="."/>
+   <exclude domain="sharedpref" path="device.xml"/>
+-->
+</full-backup-content>
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\main\res\xml\data_extraction_rules.xml ==========
+
+<?xml version="1.0" encoding="utf-8"?><!--
+   Sample data extraction rules file; uncomment and customize as necessary.
+   See https://developer.android.com/about/versions/12/backup-restore#xml-changes
+   for details.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- TODO: Use <include> and <exclude> to control what is backed up.
+        <include .../>
+        <exclude .../>
+        -->
+    </cloud-backup>
+    <!--
+    <device-transfer>
+        <include .../>
+        <exclude .../>
+    </device-transfer>
+    -->
+</data-extraction-rules>
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\main\AndroidManifest.xml ==========
+
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.MiTiempoSemanal">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".CategoriasActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".TareasActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- Nueva actividad del Sprint 2 -->
+        <activity
+            android:name=".CalendarioActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
+    </application>
+
+</manifest>
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\src\test\java\pe\edu\instituto\ponce\mitiemposemanal\ExampleUnitTest.kt ==========
+
+package pe.edu.instituto.ponce.mitiemposemanal
+
+import org.junit.Test
+
+import org.junit.Assert.*
+
+/**
+ * Example local unit test, which will execute on the development machine (host).
+ *
+ * See [testing documentation](http://d.android.com/tools/testing).
+ */
+class ExampleUnitTest {
+    @Test
+    fun addition_isCorrect() {
+        assertEquals(4, 2 + 2)
+    }
+}
+
+
+========== C:\proyectos_android\MiTiempoSemanal\app\build.gradle.kts ==========
+
+plugins {
+    alias(libs.plugins.android.application)
+}
+
+android {
+    namespace = "pe.edu.instituto.ponce.mitiemposemanal"
+    compileSdk {
+        version = release(37)
+    }
+
+    defaultConfig {
+        applicationId = "com.senati.mitiemposemanal.eporras"
+        minSdk = 24
+        targetSdk = 36
+        versionCode = 2
+        versionName = "0.2.0"
+
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    buildTypes {
+        release {
+            optimization {
+                enable = false
+            }
+        }
+    }
+    compileOptions {
+        isCoreLibraryDesugaringEnabled = true
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
+    }
+}
+
+dependencies {
+    implementation(libs.androidx.activity.ktx)
+    implementation(libs.androidx.appcompat)
+    implementation(libs.androidx.constraintlayout)
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.material)
+    testImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.espresso.core)
+    androidTestImplementation(libs.androidx.junit)
+
+    // Soporte para LocalDateTime y Duration en versiones anteriores a API 26
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
+}
+
+
+========== C:\proyectos_android\MiTiempoSemanal\gradle\wrapper\gradle-wrapper.properties ==========
+
+#Mon Oct 12 16:09:38 GMT-05:00 2026
+distributionBase=GRADLE_USER_HOME
+distributionPath=wrapper/dists
+distributionSha256Sum=553c78f50dafcd54d65b9a444649057857469edf836431389695608536d6b746
+distributionUrl=https\://services.gradle.org/distributions/gradle-9.5.0-bin.zip
+networkTimeout=10000
+validateDistributionUrl=true
+zipStoreBase=GRADLE_USER_HOME
+zipStorePath=wrapper/dists
+
+
+========== C:\proyectos_android\MiTiempoSemanal\gradle\gradle-daemon-jvm.properties ==========
+
+#This file is generated by updateDaemonJvm
+toolchainUrl.FREE_BSD.AARCH64=https\://api.foojay.io/disco/v3.0/ids/cf726b4a1c84b50457225f9bba6d7650/redirect
+toolchainUrl.FREE_BSD.X86_64=https\://api.foojay.io/disco/v3.0/ids/fa1e318c287360478e3c83a9a3ef1007/redirect
+toolchainUrl.LINUX.AARCH64=https\://api.foojay.io/disco/v3.0/ids/cf726b4a1c84b50457225f9bba6d7650/redirect
+toolchainUrl.LINUX.X86_64=https\://api.foojay.io/disco/v3.0/ids/fa1e318c287360478e3c83a9a3ef1007/redirect
+toolchainUrl.MAC_OS.AARCH64=https\://api.foojay.io/disco/v3.0/ids/c2dd35c9d0aaf0ba6ad0791320f99dfc/redirect
+toolchainUrl.MAC_OS.X86_64=https\://api.foojay.io/disco/v3.0/ids/e5810bd7fd1f8a586644409d395a7e55/redirect
+toolchainUrl.UNIX.AARCH64=https\://api.foojay.io/disco/v3.0/ids/cf726b4a1c84b50457225f9bba6d7650/redirect
+toolchainUrl.UNIX.X86_64=https\://api.foojay.io/disco/v3.0/ids/fa1e318c287360478e3c83a9a3ef1007/redirect
+toolchainUrl.WINDOWS.AARCH64=https\://api.foojay.io/disco/v3.0/ids/7b3c4877c0749019e6805bb61e421497/redirect
+toolchainUrl.WINDOWS.X86_64=https\://api.foojay.io/disco/v3.0/ids/d76df094a9cbbabd3b08251f9e61444a/redirect
+toolchainVersion=25
+
+
+========== C:\proyectos_android\MiTiempoSemanal\build.gradle.kts ==========
+
+// Top-level build file where you can add configuration options common to all sub-projects/modules.
+plugins {
+    alias(libs.plugins.android.application) apply false
+}
+
+
+========== C:\proyectos_android\MiTiempoSemanal\gradle.properties ==========
+
+# Project-wide Gradle settings.
+# IDE (e.g. Android Studio) users:
+# Gradle settings configured through the IDE *will override*
+# any settings specified in this file.
+# For more details on how to configure your build environment visit
+# http://www.gradle.org/docs/current/userguide/build_environment.html
+# Specifies the JVM arguments used for the daemon process.
+# The setting is particularly useful for tweaking memory settings.
+org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+# When configured, Gradle will run in incubating parallel mode.
+# This option should only be used with decoupled projects. For more details, visit
+# https://developer.android.com/r/tools/gradle-multi-project-decoupled-projects
+# org.gradle.parallel=true
+# When enabled, the Configuration Cache allows Gradle to skip the configuration
+# phase entirely if nothing that affects the build configuration (such as build scripts)
+# has changed. Additionally, Gradle applies performance optimizations to task execution.
+org.gradle.configuration-cache=true
+# Kotlin code style for this project: "official" or "obsolete":
+kotlin.code.style=official
+
+
+========== C:\proyectos_android\MiTiempoSemanal\local.properties ==========
+
+## This file is automatically generated by Android Studio.
+# Do not modify this file -- YOUR CHANGES WILL BE ERASED!
+#
+# This file should *NOT* be checked into Version Control Systems,
+# as it contains information specific to your local configuration.
+#
+# Location of the SDK. This is only used by Gradle.
+# For customization when using a Version Control System, please read the
+# header note.
+sdk.dir=C\:\\Users\\SENATI\\AppData\\Local\\Android\\Sdk
+
+
+========== C:\proyectos_android\MiTiempoSemanal\settings.gradle.kts ==========
+
+pluginManagement {
+    repositories {
+        google {
+            content {
+                includeGroupByRegex("com\\.android.*")
+                includeGroupByRegex("com\\.google.*")
+                includeGroupByRegex("androidx.*")
+            }
+        }
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+plugins {
+    id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.name = "MiTiempoSemanal"
+include(":app")

@@ -14,6 +14,7 @@ class MainActivity : AppCompatActivity() {
         // Enlazamos las variables con los botones del diseño XML
         val btnCategorias = findViewById<Button>(R.id.btnCategorias)
         val btnTareas = findViewById<Button>(R.id.btnTareas)
+        val btnCalendario = findViewById<Button>(R.id.btnCalendario) // Nuevo botón
 
         // Acción para ir a la pantalla de Categorías
         btnCategorias.setOnClickListener {
@@ -24,6 +25,12 @@ class MainActivity : AppCompatActivity() {
         // Acción para ir a la pantalla de Tareas
         btnTareas.setOnClickListener {
             val intent = Intent(this, TareasActivity::class.java)
+            startActivity(intent)
+        }
+
+        // Acción para ir a la pantalla del Calendario
+        btnCalendario.setOnClickListener {
+            val intent = Intent(this, CalendarioActivity::class.java)
             startActivity(intent)
         }
     }
