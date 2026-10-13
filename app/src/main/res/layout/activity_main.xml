@@ -6,7 +6,6 @@
     android:fitsSystemWindows="true"
     android:background="@color/fondo_oscuro">
 
-    <!-- Contenedor interno centrado con márgenes -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
@@ -55,12 +54,11 @@
             android:layout_marginBottom="24dp"
             android:stateListAnimator="@null" />
 
-        <!-- Nuevo botón para el Calendario (Sprint 2) -->
         <Button
             android:id="@+id/btnCalendario"
             android:layout_width="match_parent"
             android:layout_height="65dp"
-            android:text="> GESTIONAR CALENDARIO"
+            android:text="> GESTIONAR EVENTOS"
             android:textColor="@color/fondo_oscuro"
             android:backgroundTint="@color/blanco_pixel"
             android:textStyle="bold"
@@ -69,7 +67,6 @@
             android:layout_marginBottom="48dp"
             android:stateListAnimator="@null" />
 
-        <!-- Versión actualizada a v0.2.0 -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
