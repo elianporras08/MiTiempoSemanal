@@ -1,20 +1,30 @@
 package pe.edu.instituto.ponce.mitiemposemanal
 
+import android.content.Intent
 import android.os.Bundle
-import androidx.activity.enableEdgeToEdge
+import android.widget.Button
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
 
 class MainActivity : AppCompatActivity() {
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
         setContentView(R.layout.activity_main)
-        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
-            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
-            insets
+
+        // Enlazamos las variables con los botones del diseño XML
+        val btnCategorias = findViewById<Button>(R.id.btnCategorias)
+        val btnTareas = findViewById<Button>(R.id.btnTareas)
+
+        // Acción para ir a la pantalla de Categorías
+        btnCategorias.setOnClickListener {
+            val intent = Intent(this, CategoriasActivity::class.java)
+            startActivity(intent)
+        }
+
+        // Acción para ir a la pantalla de Tareas
+        btnTareas.setOnClickListener {
+            val intent = Intent(this, TareasActivity::class.java)
+            startActivity(intent)
         }
     }
 }

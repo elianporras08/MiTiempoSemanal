@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:padding="12dp"
+    android:gravity="center_vertical"
+    android:background="@color/fondo_oscuro">
+
+    <!-- Contenedor para los textos -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:layout_marginEnd="8dp">
+
+        <!-- Nombre de la tarea -->
+        <TextView
+            android:id="@+id/tvNombreTareaItem"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="@color/blanco_pixel"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:fontFamily="monospace" />
+
+        <!-- Nombre de la categoría -->
+        <TextView
+            android:id="@+id/tvCategoriaTareaItem"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="@color/blanco_pixel"
+            android:textSize="14sp"
+            android:fontFamily="monospace"
+            android:alpha="0.8" />
+    </LinearLayout>
+
+    <!-- Botón Editar -->
+    <Button
+        android:id="@+id/btnEditarTarea"
+        android:layout_width="wrap_content"
+        android:layout_height="40dp"
+        android:text="EDITAR"
+        android:textColor="@color/fondo_oscuro"
+        android:backgroundTint="@color/blanco_pixel"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:fontFamily="monospace"
+        android:layout_marginEnd="8dp"
+        android:stateListAnimator="@null" />
+
+    <!-- Botón Borrar -->
+    <Button
+        android:id="@+id/btnBorrarTarea"
+        android:layout_width="wrap_content"
+        android:layout_height="40dp"
+        android:text="BORRAR"
+        android:textColor="@color/fondo_oscuro"
+        android:backgroundTint="@color/blanco_pixel"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:fontFamily="monospace"
+        android:stateListAnimator="@null" />
+
+</LinearLayout>

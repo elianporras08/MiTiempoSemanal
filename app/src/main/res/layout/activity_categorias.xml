@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:fitsSystemWindows="true"
+    android:background="@color/fondo_oscuro">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:layout_marginStart="32dp"
+        android:layout_marginEnd="32dp"
+        android:layout_marginTop="32dp"
+        android:layout_marginBottom="32dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="24dp">
+
+            <!-- Botón Volver convertido en "solo flecha" -->
+            <Button
+                android:id="@+id/btnVolver"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="←"
+                android:textColor="@color/blanco_pixel"
+                android:background="@android:color/transparent"
+                android:textSize="36sp"
+                android:textStyle="bold"
+                android:fontFamily="monospace"
+                android:stateListAnimator="@null"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:padding="0dp"/>
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="[ CATEGORÍAS ]"
+                android:textColor="@color/blanco_pixel"
+                android:textSize="26sp"
+                android:textStyle="bold"
+                android:textAlignment="center"
+                android:fontFamily="monospace"
+                android:letterSpacing="0.05"
+                android:layout_marginStart="8dp"/>
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="16dp">
+
+            <EditText
+                android:id="@+id/etNombreCategoria"
+                android:layout_width="0dp"
+                android:layout_height="55dp"
+                android:layout_weight="1"
+                android:hint="NUEVA CATEGORÍA_"
+                android:textColorHint="@color/gris_medio"
+                android:textColor="@color/blanco_pixel"
+                android:backgroundTint="@color/blanco_pixel"
+                android:inputType="textCapWords"
+                android:maxLines="1"
+                android:fontFamily="monospace"
+                android:padding="8dp"/>
+
+            <Button
+                android:id="@+id/btnGuardarCategoria"
+                android:layout_width="wrap_content"
+                android:layout_height="55dp"
+                android:text="GUARDAR"
+                android:textColor="@color/fondo_oscuro"
+                android:backgroundTint="@color/blanco_pixel"
+                android:textStyle="bold"
+                android:fontFamily="monospace"
+                android:stateListAnimator="@null"
+                android:layout_marginStart="8dp"/>
+        </LinearLayout>
+
+        <ListView
+            android:id="@+id/lvCategorias"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:divider="@color/gris_medio"
+            android:dividerHeight="2dp"/>
+    </LinearLayout>
+</LinearLayout>

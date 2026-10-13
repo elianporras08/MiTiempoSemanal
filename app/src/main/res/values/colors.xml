@@ -2,4 +2,9 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
+    <!-- Nueva Paleta Techno Time / Pixel Party -->
+    <color name="fondo_oscuro">#151515</color> <!-- Gris casi negro -->
+    <color name="blanco_pixel">#F4F4F4</color> <!-- Blanco para los textos y bordes -->
+    <color name="gris_medio">#444444</color> <!-- Para algunos detalles secundarios -->
 </resources>

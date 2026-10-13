@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:padding="12dp"
+    android:gravity="center_vertical"
+    android:background="@color/fondo_oscuro">
+
+    <!-- Nombre de la categoría -->
+    <TextView
+        android:id="@+id/tvNombreCategoriaItem"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:textColor="@color/blanco_pixel"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:fontFamily="monospace" />
+
+    <!-- Botón Editar -->
+    <Button
+        android:id="@+id/btnEditarCategoria"
+        android:layout_width="wrap_content"
+        android:layout_height="40dp"
+        android:text="EDITAR"
+        android:textColor="@color/fondo_oscuro"
+        android:backgroundTint="@color/blanco_pixel"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:fontFamily="monospace"
+        android:layout_marginEnd="8dp"
+        android:stateListAnimator="@null" />
+
+    <!-- Botón Borrar -->
+    <Button
+        android:id="@+id/btnBorrarCategoria"
+        android:layout_width="wrap_content"
+        android:layout_height="40dp"
+        android:text="BORRAR"
+        android:textColor="@color/fondo_oscuro"
+        android:backgroundTint="@color/blanco_pixel"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:fontFamily="monospace"
+        android:stateListAnimator="@null" />
+
+</LinearLayout>
